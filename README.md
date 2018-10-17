@@ -1,1 +1,3 @@
-# Real-time_avatar_rendering_from_movement_follow_up
+# Real-time Rendering of a 3D avatar from the follow-up of a person’s position in a sequence of images
+This project consists of the development of a real time software application and it is divided into several modules. 
+Firstly, the tracking of a person’s controlled movement (in a determined position), by using markers distributed all over his body, obtaining a set of coordinates that define a simple skeleton. This has been done by using the computer vision library OpenCV and the Java programming language. The other module consists of the rendering of a 3D avatar, which moves according to the coordinates obtained in the first part. To do this, the 3D virtual reality library Three.js is used, and it is programmed in the JavaScript language. Socket.IO is used to communicate both sides. In this module, the coordinates obtained with OpenCV are sent to the module of Three.js.
