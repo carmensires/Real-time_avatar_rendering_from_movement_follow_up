@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - animation - skinning</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body {
+				color: #fff;
+				font-family:Monospace;
+				font-size:13px;
+				text-align:center;
+				background-color: #fff;
+				margin: 0px;
+				overflow: hidden;
+			}
+			#info {
+				position: absolute;
+				top: 0px; width: 100%;
+				padding: 5px;
+			}
+
+			#esqueleto {
+				position: absolute;
+				top: 0px; width: 100%;
+				padding: 5px;
+			}
+
+			a {
+				color: #bbb;
+			}
+			.ac {  /* prevent dat-gui from being selected */
+				-webkit-user-select: none;
+				-moz-user-select: none;
+				-ms-user-select: none;
+				user-select: none;
+			}
+			.no-pointer-events {
+				pointer-events: none;
+			}
+			.control-disabled {
+				color: #888;
+				text-decoration: line-through;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="container"></div>
+		<!--<div id="info">
+			Marine Skeletal Animation Blending
+		</div>-->
+
+
+		<script src="../build/three.js"></script>
+		<script src="js/Detector.js"></script>
+		<script src="js/controls/OrbitControls.js"></script>
+		<script src="js/libs/dat.gui.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/0.9.16/socket.io.min.js"></script>
+    <script src="https://code.jquery.com/jquery-1.11.1.js"></script>
+
+		<script>
+
+			if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
+
+			var container = document.getElementById( 'container' );
+
+			var scene, renderer, camera, controls;
+			var mesh, skeleton, mixer;
+
+			var idleAction, walkAction, runAction;
+			var actions;
+			var settings;
+
+
+			var coordenadas;
+			var pos_R_Arm = 0;
+
+			var clock = new THREE.Clock();
+
+			var url = 'models/skinned/marine/marine_anims_core.json';
+
+			// Initialize scene, light and renderer
+			scene = new THREE.Scene();
+			scene.add( new THREE.AmbientLight( 0xffffff ) );
+
+			renderer = new THREE.WebGLRenderer( { antialias: true } );
+			renderer.setClearColor( 0x333333 );
+			renderer.setPixelRatio( window.devicePixelRatio );
+			renderer.setSize( window.innerWidth, window.innerHeight );
+
+			container.appendChild( renderer.domElement );
+
+			//Get coordinates from opencv
+			function getCoordinates() {
+				//var coordenadas = [];
+				var socket = io.connect("http://localhost:5000");
+
+				socket.on('message', function(msg){
+					console.log("\n"+msg);
+					coordenadas = JSON.parse(msg);
+					actualizarPosicion();
+        		});
+
+				socket.on('connect', function(){
+					console.log('connected');
+					socket.send("hola");
+				});
+
+
+			}
+
+			// Load skinned mesh
+			new THREE.ObjectLoader().load( url, function ( loadedObject ) {
+
+				loadedObject.traverse( function ( child ) {
+
+					if ( child instanceof THREE.SkinnedMesh ) {
+						mesh = child;
+					}
+
+				} );
+
+				if ( mesh === undefined ) {
+
+					alert( 'Unable to find a SkinnedMesh in this place:\n\n' + url + '\n\n' );
+					return;
+
+				}
+
+				// Add mesh and skeleton helper to scene
+				mesh.rotation.y = - 180 * Math.PI / 180;
+				scene.add( mesh );
+				skeleton = new THREE.SkeletonHelper( mesh );
+				skeleton.visible = true;
+				scene.add( skeleton );
+
+
+				// Initialize camera and camera controls
+				var radius = mesh.geometry.boundingSphere.radius;
+				var aspect = window.innerWidth / window.innerHeight;
+				camera = new THREE.PerspectiveCamera( 45, aspect, 1, 10000 );
+				camera.position.set( 0.0, radius, radius * 3.5 );
+
+				controls = new THREE.OrbitControls( camera, renderer.domElement );
+				controls.target.set( 0, radius, 0 );
+				controls.update();
+
+				// Create the control panel
+				createPanel();
+
+				// Initialize mixer and clip actions
+				mixer = new THREE.AnimationMixer( mesh );
+
+				idleAction = mixer.clipAction( 'idle' );
+				walkAction = mixer.clipAction( 'walk' );
+				runAction = mixer.clipAction( 'run' );
+				actions = [ idleAction, walkAction, runAction ];
+
+				activateAllActions();
+				pauseAllActions();
+				
+				
+
+				// Listen on window resizing and start the render loop
+				window.addEventListener( 'resize', onWindowResize, false );
+				animate();
+
+			} );
+
+
+			function createPanel() {
+
+				var panel = new dat.GUI( { width: 310 } );
+				var folder1 = panel.addFolder( 'Options' );
+
+				settings = {
+					'show model':             true,
+					'show skeleton':          true,
+					'pause/continue':         pauseContinue,
+					'actualizarPosicion':	  actualizarPosicion,
+					'start':				  start,
+					'getCoordinates': 		  getCoordinates,
+				};
+
+				folder1.add( settings, 'show model' ).onChange( showModel );
+				folder1.add( settings, 'show skeleton' ).onChange( showSkeleton );
+				folder1.add( settings, 'pause/continue' );
+				folder1.add( settings, 'actualizarPosicion' );
+				folder1.add( settings, 'start');
+				folder1.add( settings, 'getCoordinates');
+				folder1.open();
+
+			}
+
+
+			function showModel( visibility ) {
+
+				mesh.visible = visibility;
+
+			}
+
+			function showSkeleton( visibility ) {
+
+				skeleton.visible = visibility;
+
+			}
+
+			function activateAllActions() {
+
+				actions.forEach( function ( action ) {
+
+					action.play();
+
+				} );
+
+			}
+
+			function deactivateAllActions() {
+
+				actions.forEach( function ( action ) {
+
+					action.stop();
+
+				} );
+
+			}
+
+			function start() {
+				actions[1].stop();
+				actions[2].stop();
+				actions[0].play();
+			}
+
+
+			function pauseContinue() {
+
+					if ( idleAction.paused ) {
+
+						unPauseAllActions();
+
+					} else {
+
+						pauseAllActions();
+
+					}
+
+			}
+
+			function convertCoordinates(){
+				//voltear las coordenadas horizontal y verticalmente, porque en OpenCV se recogen al revés
+				var coor=coordenadas.map(function(i){
+					return {name:i.name, x:1350-i.x, y:750-i.y};
+				});
+
+				//normalizar coordenadas, ya que de esta forma resultará más fácil trabajar con ellas
+				//y adaptarlas a la pantalla como se necesite
+				var coordenadasNormalizadas = coor.map(function(i){
+					return {name:i.name, x:(i.x-675)/675, y:(i.y-375)/375};
+				});
+
+				return coordenadasNormalizadas;
+			}
+
+			function moveBody(bone,x1) {
+				var x = x1*window.innerWidth/4;
+				console.log("\nx: "+x);
+				mesh.skeleton.bones[bone].position.setX(x);
+			}
+
+			function getCentro(coor){
+				//calcular el centro del cuerpo a partir de las coordenadas de OpenCV, usando los 4 puntos del torso.
+				var centro = {
+					x: (coor[11].x+coor[5].x+coor[8].x+coor[2].x)/4,
+					y: (coor[11].y+coor[5].y+coor[8].y+coor[2].y)/4
+				};
+				return centro;
+			}
+
+			function getRelativeCoordinates(coordenadasConvertidas,centro){
+				var coor =coordenadasConvertidas.map(function(i){
+					return {name:i.name, x:i.x-centro.x, y:i.y-centro.y};
+				});
+				coor.forEach(function(i){
+					console.log(JSON.stringify(i));
+				});
+			}
+
+
+			function move_R_Arm(coor) {
+				var mano = coor[9].y;
+				var codo = coor[10].y;
+				if(mano>-0.15 && mano<0.09 && codo>-0.15 && codo<0.09 && pos_R_Arm==0)
+				{
+					pos_R_Arm = 1;
+					mesh.skeleton.bones[20].rotateX(-0.5);
+				}
+				else if (mano>-0.15 && mano<0.09 && codo>-0.15 && codo<0.09 && pos_R_Arm==2)
+				{
+					pos_R_Arm = 1;
+					mesh.skeleton.bones[20].rotateX(0.5);
+				}
+				else if(mano>-0.15 && mano<0.09 && codo>0.09 && pos_R_Arm==1)
+				{
+					pos_R_Arm = 2;
+					mesh.skeleton.bones[20].rotateX(-0.5);
+				}
+				else if(mano>-0.15 && mano<0.09 && codo>0.09 && pos_R_Arm==3)
+				{
+					pos_R_Arm = 2;
+					mesh.skeleton.bones[20].rotateX(0.5);
+				}
+				else if(mano>0.09 && codo>0.09 && pos_R_Arm==2)
+				{
+					pos_R_Arm = 3;
+					mesh.skeleton.bones[20].rotateX(-0.5);
+				}
+				else if(mano>0.09 && codo>-0.15 && codo<0.09 && pos_R_Arm==1)
+				{
+					pos_R_Arm = 4;
+					mesh.skeleton.bones[21].rotateX(-1.5);
+				}
+				else if(mano>-0.15 && mano<0.09 && codo>-0.15 && codo<0.09 && pos_R_Arm==4)
+				{
+					pos_R_Arm = 1;
+					mesh.skeleton.bones[21].rotateX(1.5);
+				}
+
+			}
+
+			function move_L_Arm(coor) {
+				var mano = coor[3].y;
+				var codo = coor[4].y;
+				if(mano>-0.15 && mano<0.09 && codo>-0.15 && codo<0.09 && pos_L_Arm==0)
+				{
+					pos_L_Arm = 1;
+					mesh.skeleton.bones[39].rotateX(-0.5);
+				}
+				else if (mano>-0.15 && mano<0.09 && codo>-0.15 && codo<0.09 && pos_L_Arm==2)
+				{
+					pos_L_Arm = 1;
+					mesh.skeleton.bones[39].rotateX(0.5);
+				}
+				else if(mano>-0.15 && mano<0.09 && codo>0.09 && pos_L_Arm==1)
+				{
+					pos_L_Arm = 2;
+					mesh.skeleton.bones[39].rotateX(-0.5);
+				}
+				else if(mano>-0.15 && mano<0.09 && codo>0.09 && pos_L_Arm==3)
+				{
+					pos_L_Arm = 2;
+					mesh.skeleton.bones[39].rotateX(0.5);
+				}
+				else if(mano>0.09 && codo>0.09 && pos_L_Arm==2)
+				{
+					pos_L_Arm = 3;
+					mesh.skeleton.bones[39].rotateX(-0.5);
+				}
+				else if(mano>0.09 && codo>-0.15 && codo<0.09 && pos_L_Arm==1)
+				{
+					pos_L_Arm = 4;
+					mesh.skeleton.bones[40].rotateX(-1.5);
+				}
+				else if(mano>-0.15 && mano<0.09 && codo>-0.15 && codo<0.09 && pos_L_Arm==4)
+				{
+					pos_L_Arm = 1;
+					mesh.skeleton.bones[40].rotateX(1.5);
+				}
+			}
+
+			function move_R_Leg(coor) {
+				
+			}
+
+			function move_L_Leg(coor) {
+				
+			}
+
+			function actualizarPosicion(){
+				var coordenadasConvertidas =convertCoordinates();
+				var centro=getCentro(coordenadasConvertidas);
+				var coor = getRelativeCoordinates(coordenadasConvertidas,centro);
+				moveBody(0,centro.x);
+				move_R_Arm(coor);
+				move_L_Arm(coor);
+				move_R_Leg(coor);
+				move_L_Leg(coor);
+			}
+
+
+
+			function pauseAllActions() {
+
+				actions.forEach( function ( action ) {
+
+					action.paused = true;
+
+				} );
+
+			}
+
+			function unPauseAllActions() {
+
+				actions.forEach( function ( action ) {
+
+					action.paused = false;
+
+				} );
+
+			}
+
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			}
+
+
+			function animate() {
+
+				// Render loop
+				requestAnimationFrame( animate );
+
+				// Get the time elapsed since the last frame, used for mixer update (if not in single step mode)
+				var mixerUpdateDelta = clock.getDelta();
+
+				// Update the animation mixer and the skeleton, and render this frame
+				mixer.update( mixerUpdateDelta );
+				skeleton.update();
+				renderer.render( scene, camera );
+
+			}
+
+			function printCoordinates(){
+
+				console.log("COORDENADAS BONES\n");
+				for ( var i = 0; i < mesh.skeleton.bones.length; ++i ) {
+					console.log("\n Nombre: "+mesh.skeleton.bones[i].name);
+					console.log("\n Coordenadas: "+mesh.skeleton.bones[i].position.x+", "+mesh.skeleton.bones[i].position.y+", "+mesh.skeleton.bones[i].position.z);
+				}
+			}
+
+		</script>
+
+	</body>
+</html>
